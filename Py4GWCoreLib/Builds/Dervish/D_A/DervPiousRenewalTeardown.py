@@ -63,7 +63,6 @@ class DervPiousRenewalTeardown(BuildMgr):
         super().__init__(
             name="Pious Renewal Teardown",
             required_primary=Profession.Dervish,
-            template_code="OgejkyrG7SbXSXRXPXihcXyg4OA",
             required_skills=[PIOUS_RENEWAL_ID],
         )
         if match_only:
