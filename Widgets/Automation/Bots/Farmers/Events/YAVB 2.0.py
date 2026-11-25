@@ -38,6 +38,17 @@ def _count_salvage_kits() -> int:
     """Total salvage kits of any type in the backpack, belt pouch and bags 1-2."""
     return sum(GLOBAL_CACHE.Inventory.GetModelCount(kit.value) for kit in SALVAGE_KIT_MODEL_IDS)
 
+# Every kit that can identify. If any of these is in the bags, YAVB must not buy another ID kit.
+ID_KIT_MODEL_IDS = (
+    ModelID.Identification_Kit,
+    ModelID.Superior_Identification_Kit,
+    ModelID.Infinite_Identification_Kit,
+)
+
+def _count_id_kits() -> int:
+    """Total identification kits of any type in the backpack, belt pouch and bags 1-2."""
+    return sum(GLOBAL_CACHE.Inventory.GetModelCount(kit.value) for kit in ID_KIT_MODEL_IDS)
+
 def _identify_live_inventory_items():
     """Identify configured rarities using the live inventory item IDs.
 
@@ -219,7 +230,7 @@ def NeedsInventoryManagement(bot: Botting):
     free_slots_in_inventory = GLOBAL_CACHE.Inventory.GetFreeSlotCount()
     leave_empty_slots = bot.Properties.Get("leave_empty_inventory_slots", "value")
 
-    count_of_id_kits = GLOBAL_CACHE.Inventory.GetModelCount(ModelID.Superior_Identification_Kit.value)
+    count_of_id_kits = _count_id_kits()
     count_of_salvage_kits = _count_salvage_kits()
 
     if (
@@ -334,17 +345,30 @@ def RestockSalvageKitsIfNeeded(bot: Botting):
     yield
 
 
+def RestockIdentifyKitsIfNeeded(bot: Botting):
+    """Buy identification kits only when the bags hold no ID kit of any type."""
+    if bot.Properties.IsActive("identify_kits"):
+        kits_in_inventory = _count_id_kits()
+        if kits_in_inventory > 0:
+            _log_yavb_debug("RestockIdentifyKits", f"Skipping purchase, kits_in_inventory={kits_in_inventory}")
+        else:
+            kits_to_buy = bot.Properties.Get("identify_kits", "restock_quantity")
+            _log_yavb_debug("RestockIdentifyKits", f"No ID kit found, buying {kits_to_buy}")
+            yield from Routines.Yield.Merchant.BuyIDKits(kits_to_buy)
+    yield
+
+
 def HandleInventory(bot: Botting) -> None:
     bot.States.AddHeader("Inventory Handling")
     bot.Items.AutoIDAndSalvageAndDepositItems() #sort bags, auto id, salvage, deposit to bank
     bot.Move.XYAndInteractNPC(-23110, 14942) # Merchant in Longeyes Ledge
     bot.Wait.ForTime(500)
     bot.Merchant.SellMaterialsToMerchant() # Sell materials to merchant, make space in inventory
-    bot.Merchant.Restock.IdentifyKits() #restock identify kits
+    bot.States.AddCustomState(lambda: RestockIdentifyKitsIfNeeded(bot), "Restock ID Kits") #buy only if no kit of any type
     bot.States.AddCustomState(lambda: RestockSalvageKitsIfNeeded(bot), "Restock Salvage Kits") #buy only if no kit of any type
     bot.Items.AutoIDAndSalvageAndDepositItems() #sort bags again to make sure everything is deposited
     bot.Merchant.SellMaterialsToMerchant() #Sell remaining materials again to make sure inventory is clear
-    bot.Merchant.Restock.IdentifyKits() #restock identify kits
+    bot.States.AddCustomState(lambda: RestockIdentifyKitsIfNeeded(bot), "Restock ID Kits") #buy only if no kit of any type
     bot.States.AddCustomState(lambda: RestockSalvageKitsIfNeeded(bot), "Restock Salvage Kits") #buy only if no kit of any type
     bot.Items.Restock.BirthdayCupcake() #restock birthday cupcake
     
