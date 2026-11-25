@@ -23,6 +23,21 @@ bot.Properties.Set("leave_empty_inventory_slots", value=6)
   
 MODULE_ICON = "Assets\\Textures\\Module_Icons\\YAVB 2.0 mascot.png"
 
+# Every kit that can salvage, from the basic merchant kit up to the infinite one.
+# If any of these is in the bags, YAVB must not buy another salvage kit.
+SALVAGE_KIT_MODEL_IDS = (
+    ModelID.Salvage_Kit,
+    ModelID.Salvage_Kit_preSearing,
+    ModelID.Expert_Salvage_Kit,
+    ModelID.Superior_Salvage_Kit,
+    ModelID.Perfect_Salvage_Kit,
+    ModelID.Infinite_Superior_Salvage_Kit,
+)
+
+def _count_salvage_kits() -> int:
+    """Total salvage kits of any type in the backpack, belt pouch and bags 1-2."""
+    return sum(GLOBAL_CACHE.Inventory.GetModelCount(kit.value) for kit in SALVAGE_KIT_MODEL_IDS)
+
 def _identify_live_inventory_items():
     """Identify configured rarities using the live inventory item IDs.
 
@@ -205,7 +220,7 @@ def NeedsInventoryManagement(bot: Botting):
     leave_empty_slots = bot.Properties.Get("leave_empty_inventory_slots", "value")
 
     count_of_id_kits = GLOBAL_CACHE.Inventory.GetModelCount(ModelID.Superior_Identification_Kit.value)
-    count_of_salvage_kits = GLOBAL_CACHE.Inventory.GetModelCount(ModelID.Salvage_Kit.value)
+    count_of_salvage_kits = _count_salvage_kits()
 
     if (
         free_slots_in_inventory < leave_empty_slots
@@ -306,6 +321,19 @@ def _set_build_stuck_signal(build: BuildMgr, stuck_counter: int) -> None:
         build.SetStuckSignal(stuck_counter)
 
 
+def RestockSalvageKitsIfNeeded(bot: Botting):
+    """Buy salvage kits only when the bags hold no salvage kit of any type."""
+    if bot.Properties.IsActive("salvage_kits"):
+        kits_in_inventory = _count_salvage_kits()
+        if kits_in_inventory > 0:
+            _log_yavb_debug("RestockSalvageKits", f"Skipping purchase, kits_in_inventory={kits_in_inventory}")
+        else:
+            kits_to_buy = bot.Properties.Get("salvage_kits", "restock_quantity")
+            _log_yavb_debug("RestockSalvageKits", f"No salvage kit found, buying {kits_to_buy}")
+            yield from Routines.Yield.Merchant.BuySalvageKits(kits_to_buy)
+    yield
+
+
 def HandleInventory(bot: Botting) -> None:
     bot.States.AddHeader("Inventory Handling")
     bot.Items.AutoIDAndSalvageAndDepositItems() #sort bags, auto id, salvage, deposit to bank
@@ -313,11 +341,11 @@ def HandleInventory(bot: Botting) -> None:
     bot.Wait.ForTime(500)
     bot.Merchant.SellMaterialsToMerchant() # Sell materials to merchant, make space in inventory
     bot.Merchant.Restock.IdentifyKits() #restock identify kits
-    bot.Merchant.Restock.SalvageKits() #restock salvage kits
+    bot.States.AddCustomState(lambda: RestockSalvageKitsIfNeeded(bot), "Restock Salvage Kits") #buy only if no kit of any type
     bot.Items.AutoIDAndSalvageAndDepositItems() #sort bags again to make sure everything is deposited
     bot.Merchant.SellMaterialsToMerchant() #Sell remaining materials again to make sure inventory is clear
     bot.Merchant.Restock.IdentifyKits() #restock identify kits
-    bot.Merchant.Restock.SalvageKits() #restock salvage kits
+    bot.States.AddCustomState(lambda: RestockSalvageKitsIfNeeded(bot), "Restock Salvage Kits") #buy only if no kit of any type
     bot.Items.Restock.BirthdayCupcake() #restock birthday cupcake
     
 def _wait_for_aggro_ball(bot: Botting, side_label: str, cycle_timeout: int = 150):
